@@ -1,29 +1,18 @@
+// server.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const multer = require('multer');
 const apiRoutes = require('./routes/api');
 const authRoutes = require('./routes/auth');
 const { authenticate } = require('./middleware/authenticate');
 const { pool } = require('./db'); // Direct pool import for health check
-const logger = require('./utils/logger'); // Recommended addition
+const logger = require('./utils/logger'); // Recommended logging util
 
 const app = express();
-
-// Root Route
-app.get('/', (req, res) => {
-  res.send(`
-    <h1>Medical Image Analysis API</h1>
-    <p>Endpoints:</p>
-    <ul>
-      <li><b>GET /api/results</b> - List all analyses</li>
-      <li><b>POST /api/upload</b> - Upload an image</li>
-      <li><b>POST /auth/login</b> - User login</li>
-    </ul>
-  `);
-});
 
 // ======================
 // Security Middleware
@@ -35,17 +24,19 @@ app.use(helmet());
 // ======================
 const allowedOrigins = process.env.FRONTEND_URL?.split(',') || ['http://localhost:3000'];
 
-// CORS custom headers middleware
+// Inject CORS headers manually
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Headers', 
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   }
   next();
 });
 
-// CORS middleware to handle preflight requests
+// Main CORS middleware
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -56,13 +47,15 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Enable preflight for all routes
 app.options('*', cors());
 
-// Rate limiting (100 requests per 15 minutes)
+// ======================
+// Rate Limiting
+// ======================
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -79,7 +72,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ======================
-// Database Health Check
+// Health Check Endpoint
 // ======================
 app.get('/health', async (req, res) => {
   try {
@@ -95,12 +88,35 @@ app.get('/health', async (req, res) => {
 });
 
 // ======================
-// Route Registration
+// Image Upload Middleware
+// ======================
+const upload = multer({ dest: 'uploads/' });
+
+// ======================
+// Analysis Routes
+// ======================
+app.post('/api/analysis', upload.single('image'), async (req, res) => {
+  try {
+    const { patientName, patientAge, patientGender } = req.body;
+    const imageFile = req.file;
+    
+    // Process the image and save to database
+    const analysis = await processImage(imageFile.path);
+    
+    res.json({
+      analysisId: analysis.id,
+      message: 'Analysis submitted successfully'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ======================
+// Routes
 // ======================
 app.use('/api', apiRoutes);
-
-// Add auth routes under /api/auth
-app.use('/api/auth', authRoutes); // This creates /api/auth/login endpoint
+app.use('/api/auth', authRoutes); // Auth routes under /api/auth
 
 // Protected test endpoint
 app.get('/protected', authenticate, (req, res) => {
@@ -109,21 +125,21 @@ app.get('/protected', authenticate, (req, res) => {
     user: {
       id: req.user.id,
       role: req.user.role,
-      permissions: req.user.permissions
+      ...(req.user.permissions && { permissions: req.user.permissions })
     }
   });
 });
 
 // ======================
-// Documentation Route
+// Root Documentation
 // ======================
 app.get('/', (req, res) => {
   res.json({
     message: "Medical Imaging API",
     endpoints: {
       auth: {
-        login: 'POST /api/auth/login', // Updated route
-        register: 'POST /api/auth/register' // Added register route
+        login: 'POST /api/auth/login',
+        register: 'POST /api/auth/register'
       },
       api: {
         upload: 'POST /api/upload',
@@ -132,7 +148,7 @@ app.get('/', (req, res) => {
       },
       system: {
         health: 'GET /health',
-        docs: 'GET /docs' // Consider adding Swagger later
+        docs: 'GET /docs'
       }
     }
   });
@@ -144,9 +160,9 @@ app.get('/', (req, res) => {
 app.use((err, req, res, next) => {
   const statusCode = err.statusCode || 500;
   const message = statusCode === 500 ? 'Internal Server Error' : err.message;
-  
+
   logger.error(`${statusCode} - ${message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
-  
+
   res.status(statusCode).json({
     error: message,
     ...(process.env.NODE_ENV === 'development' && {
@@ -157,7 +173,7 @@ app.use((err, req, res, next) => {
 });
 
 // ======================
-// Server Initialization
+// Server Startup
 // ======================
 const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {
@@ -169,10 +185,10 @@ const server = app.listen(PORT, () => {
   `);
 });
 
-// Handle unhandled rejections
+// Graceful shutdown on unhandled rejection
 process.on('unhandledRejection', (err) => {
   logger.error(`Unhandled Rejection: ${err.stack}`);
   server.close(() => process.exit(1));
 });
 
-module.exports = server; // For testing
+module.exports = server;

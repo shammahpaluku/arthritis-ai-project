@@ -45,7 +45,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      const response = await axios.post('/auth/login', { username, password });
+      const response = await axios.post('http://localhost:5000/api/auth/login', { username, password });
       localStorage.setItem('token', response.data.token);
       setToken(response.data.token);
       await fetchUser();
@@ -56,9 +56,9 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const register = async (username, password, role = 'doctor') => {
+  const register = async (username, password) => {
     try {
-      const response = await axios.post('/auth/register', { username, password, role });
+      const response = await axios.post('/auth/register', { username, password });
       return response.data;
     } catch (error) {
       throw error.response?.data || { error: 'Registration failed' };

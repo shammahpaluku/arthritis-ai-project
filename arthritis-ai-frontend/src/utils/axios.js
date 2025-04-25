@@ -1,7 +1,8 @@
+// src/utils/axios.js
 import axios from 'axios';
 
-const instance = axios.create({
-  baseURL: process.env.REACT_APP_API_URL,
+const api = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000',
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
@@ -9,7 +10,7 @@ const instance = axios.create({
 });
 
 // Request interceptor
-instance.interceptors.request.use(
+api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -17,13 +18,11 @@ instance.interceptors.request.use(
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 // Response interceptor
-instance.interceptors.response.use(
+api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
@@ -34,4 +33,4 @@ instance.interceptors.response.use(
   }
 );
 
-export default instance;
+export default api;

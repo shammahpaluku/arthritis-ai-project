@@ -1,34 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Container,
-  Typography,
-  Grid,
-  Button,
-  Dialog,
-  DialogContent,
-  TextField,
-  MenuItem,
-  Chip,
-  Avatar,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TablePagination,
-  Box,
-  LinearProgress
+import { useNavigate } from 'react-router-dom';
+import { 
+  Container, 
+  Typography, 
+  Grid, 
+  Button, 
+  Dialog, 
+  DialogContent, 
+  TextField, 
+  MenuItem, 
+  Box, 
+  LinearProgress, 
+  Alert, 
+  Paper, 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableContainer, 
+  TableHead, 
+  TablePagination, 
+  TableRow, 
+  Avatar, 
+  Chip 
 } from '@mui/material';
-import {
-  FilterList,
-  Search,
-  Visibility
+import { 
+  CloudUpload, 
+  CheckCircle, 
+  FilterList, 
+  Search, 
+  Visibility 
 } from '@mui/icons-material';
 import PatientReport from '../components/PatientReport';
 import { useAuth } from '../context/AuthContext';
-import axios from 'axios';
+import api from '../utils/axios';
 
 const severityColors = {
   high: 'error',
@@ -38,60 +42,55 @@ const severityColors = {
 
 function Dashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [xrays, setXrays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [newAnalysisOpen, setNewAnalysisOpen] = useState(false);
   const [selectedXray, setSelectedXray] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('all');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(5);
   const [error, setError] = useState('');
+  const [formData, setFormData] = useState({
+    patientName: '',
+    patientAge: '',
+    patientGender: '',
+    xrayImage: null
+  });
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
+      setError('');
+
       try {
-        // Verify authentication first
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('Authentication token missing');
+        const response = await api.get('/results');
+
+        if (!Array.isArray(response.data)) {
+          throw new Error('Invalid response format');
         }
 
-        // Determine the correct endpoint based on role
-        const endpoint = user?.role === 'doctor'
-          ? `${process.env.REACT_APP_API_URL}/results/doctor`
-          : `${process.env.REACT_APP_API_URL}/results`;
-
-        // Make the API call with proper headers
-        const response = await axios.get(endpoint, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        // Transform data to match frontend expectations
         const formattedData = response.data.map(item => ({
           id: item.id,
           name: item.patient_name || 'Unknown Patient',
           patientId: item.patient_id,
           date: new Date(item.created_at).toLocaleDateString(),
-          result: item.diagnosis,
-          severity: item.severity || 'moderate', // default if missing
-          confidence: item.confidence || 0,
-          age: item.patient_age || '',
-          gender: item.patient_gender || ''
+          result: item.diagnosis || 'No diagnosis',
+          severity: item.severity || 'moderate',
+          confidence: item.confidence ? Math.round(item.confidence * 100) : 0,
+          age: item.patient_age || 'N/A',
+          gender: item.patient_gender || 'Unknown'
         }));
 
         setXrays(formattedData);
       } catch (error) {
-        console.error('Error fetching results:', error);
+        console.error('Fetch error:', error);
+        setError(error.response?.data?.error || error.message);
         if (error.response?.status === 401) {
           localStorage.removeItem('token');
           window.location.href = '/login';
-        } else {
-          setError(error.response?.data?.error || 'Failed to load patient records');
         }
       } finally {
         setLoading(false);
@@ -99,7 +98,7 @@ function Dashboard() {
     };
 
     fetchData();
-  }, [user]);
+  }, []);
 
   const handleOpen = (xray) => {
     setSelectedXray(xray);
@@ -135,6 +134,60 @@ function Dashboard() {
     const matchesFilter = filter === 'all' || xray.severity === filter;
     return matchesSearch && matchesFilter;
   });
+
+  const handleFormChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleFileChange = (e) => {
+    setFormData({ ...formData, xrayImage: e.target.files[0] });
+  };
+
+  const handleNewAnalysisSubmit = async () => {
+    try {
+      if (!formData.xrayImage) {
+        setError('Please upload an X-ray image');
+        return;
+      }
+
+      const formDataToSend = new FormData();
+      formDataToSend.append('patientName', formData.patientName);
+      formDataToSend.append('patientAge', formData.patientAge);
+      formDataToSend.append('patientGender', formData.patientGender);
+      formDataToSend.append('image', formData.xrayImage);
+
+      setLoading(true); // Show loading state
+      setError('');
+
+      const response = await api.post('/api/analysis', formDataToSend, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      // Reset form and close dialog
+      setFormData({
+        patientName: '',
+        patientAge: '',
+        patientGender: '',
+        xrayImage: null
+      });
+      setNewAnalysisOpen(false);
+
+      // Redirect to new analysis results
+      navigate(`/results/${response.data.analysisId}`);
+    } catch (error) {
+      console.error('Error submitting new analysis:', error);
+      setError(error.response?.data?.error || 'Analysis submission failed');
+
+      if (error.response?.status === 401) {
+        navigate('/login');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (loading) return <LinearProgress />;
   if (error) return <Typography color="error" sx={{ m: 2 }}>{error}</Typography>;
@@ -178,7 +231,12 @@ function Dashboard() {
             </TextField>
           </Grid>
           <Grid item xs={12} md={4} sx={{ textAlign: 'right' }}>
-            <Button variant="contained" color="primary">
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => setNewAnalysisOpen(true)}
+              sx={{ mb: 2 }}
+            >
               New Analysis
             </Button>
           </Grid>
@@ -264,18 +322,107 @@ function Dashboard() {
       </TableContainer>
 
       <Dialog
+        open={newAnalysisOpen}
+        onClose={() => setNewAnalysisOpen(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogContent dividers>
+          <Typography variant="h6" gutterBottom>New Analysis</Typography>
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {loading && <LinearProgress sx={{ mb: 2 }} />}
+          <TextField
+            label="Patient Name"
+            fullWidth
+            name="patientName"
+            value={formData.patientName}
+            onChange={handleFormChange}
+            sx={{ mb: 2 }}
+            required
+          />
+          <TextField
+            label="Patient Age"
+            fullWidth
+            name="patientAge"
+            value={formData.patientAge}
+            onChange={handleFormChange}
+            sx={{ mb: 2 }}
+            required
+          />
+          <TextField
+            label="Patient Gender"
+            select
+            fullWidth
+            name="patientGender"
+            value={formData.patientGender}
+            onChange={handleFormChange}
+            sx={{ mb: 2 }}
+            required
+          >
+            <MenuItem value="">Select Gender</MenuItem>
+            <MenuItem value="male">Male</MenuItem>
+            <MenuItem value="female">Female</MenuItem>
+            <MenuItem value="other">Other</MenuItem>
+          </TextField>
+
+          <Button 
+            variant="contained" 
+            component="label"
+            sx={{ mb: 2 }}
+            startIcon={<CloudUpload />}
+          >
+            Upload X-ray Image
+            <input 
+              type="file" 
+              hidden 
+              accept="image/*,.dcm" 
+              onChange={handleFileChange}
+            />
+          </Button>
+          
+          {/* File upload indicator */}
+          {formData.xrayImage && (
+            <Box sx={{
+              display: 'flex', 
+              alignItems: 'center', 
+              mb: 2,
+              p: 1,
+              border: '1px dashed',
+              borderColor: 'primary.main',
+              borderRadius: 1
+            }}>
+              <CheckCircle color="success" sx={{ mr: 1 }} />
+              <Typography variant="body2">
+                {formData.xrayImage.name} ({Math.round(formData.xrayImage.size/1024)} KB)
+              </Typography>
+            </Box>
+          )}
+          
+          <Button 
+            variant="contained" 
+            color="primary" 
+            onClick={handleNewAnalysisSubmit}
+            disabled={loading || !formData.xrayImage}
+            fullWidth
+          >
+            {loading ? 'Submitting...' : 'Submit Analysis'}
+          </Button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={open}
         onClose={handleClose}
         maxWidth="lg"
         fullWidth
         PaperProps={{ sx: { height: '90vh' } }}
       >
-        <DialogContent dividers>
-          {selectedXray && <PatientReport data={selectedXray} />}
-        </DialogContent>
-      </Dialog>
-    </Container>
-  );
-}
+                  <DialogContent dividers>
+            {selectedXray && <PatientReport data={selectedXray} />}
+          </DialogContent>
+        </Dialog>
+      </Container>
+    );
+  }
 
 export default Dashboard;

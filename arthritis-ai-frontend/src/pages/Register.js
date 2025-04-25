@@ -13,7 +13,7 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await register(username, password);
+      await register(username, password); // role is removed from function call
       navigate('/dashboard');
     } catch (err) {
       setError('Registration failed. Please try again.');

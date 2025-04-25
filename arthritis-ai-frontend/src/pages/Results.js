@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import {
   Container,
@@ -12,16 +11,19 @@ import {
   Divider,
   Chip,
   LinearProgress,
-  Alert
+  Alert,
+  Skeleton
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import MedicalInformationIcon from '@mui/icons-material/MedicalInformation';
 import ImageComparison from '../components/ImageComparison';
+import NewAnalysisDialog from '../components/NewAnalysisDialog'; // Assuming the dialog is in a separate file
 
 const StyledPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
   borderRadius: 12,
   boxShadow: theme.shadows[4],
+  minHeight: 300
 }));
 
 const ResultChip = styled(Chip)(({ severity }) => ({
@@ -36,14 +38,36 @@ const ResultChip = styled(Chip)(({ severity }) => ({
 function Results() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [analysisResults, setAnalysisResults] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  
+  // New Analysis Modal state
+  const [newAnalysisOpen, setNewAnalysisOpen] = useState(false);
+
+  // Handle New Analysis Form Submission
+  const handleNewAnalysis = async (formData) => {
+    try {
+      const response = await axios.post('/api/analysis', formData, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      // Redirect to the new analysis results
+      navigate(`/results/${response.data.analysisId}`);
+    } catch (error) {
+      throw new Error(error.response?.data?.message || 'Analysis failed');
+    }
+  };
 
   useEffect(() => {
     const fetchResults = async () => {
       try {
+        setLoading(true);
+        setError('');
+        
         if (!id || isNaN(id)) {
           throw new Error('Invalid result ID');
         }
@@ -57,19 +81,8 @@ function Results() {
           }
         );
 
-        if (user?.role === 'doctor') {
-          const hasAccess = await axios.get(
-            `${process.env.REACT_APP_API_URL}/patients/${response.data.patient_id}/access`,
-            {
-              headers: {
-                Authorization: `Bearer ${localStorage.getItem('token')}`
-              }
-            }
-          );
-
-          if (!hasAccess.data) {
-            throw new Error('Unauthorized access to patient records');
-          }
+        if (!response.data) {
+          throw new Error('No data returned');
         }
 
         setAnalysisResults(response.data);
@@ -77,8 +90,10 @@ function Results() {
         console.error('Fetch error:', err);
         const message = err.response?.data?.error || err.message || 'Failed to load results';
         setError(message);
-
-        if (message.includes('Invalid') || message.includes('Unauthorized')) {
+        
+        if (err.response?.status === 401) {
+          navigate('/login');
+        } else if (message.includes('Invalid')) {
           navigate('/dashboard');
         }
       } finally {
@@ -87,11 +102,39 @@ function Results() {
     };
 
     fetchResults();
-  }, [id, user, navigate]);
+  }, [id, navigate]);
 
-  if (loading) return <LinearProgress />;
-  if (error) return <Alert severity="error">{error}</Alert>;
-  if (!analysisResults) return null;
+  if (loading) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Skeleton variant="rectangular" width="100%" height={56} sx={{ mb: 4 }} />
+        <Grid container spacing={4}>
+          <Grid xs={12} md={8}>
+            <Skeleton variant="rectangular" width="100%" height={400} />
+          </Grid>
+          <Grid xs={12} md={4}>
+            <Skeleton variant="rectangular" width="100%" height={400} />
+          </Grid>
+        </Grid>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Alert severity="error" sx={{ mb: 4 }}>
+          {error}
+        </Alert>
+        <Button 
+          variant="contained" 
+          onClick={() => navigate('/dashboard')}
+        >
+          Back to Dashboard
+        </Button>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -101,14 +144,17 @@ function Results() {
       </Typography>
 
       <Grid container spacing={4}>
-        <Grid item xs={12} md={8}>
+        <Grid xs={12} md={8}>
           <StyledPaper>
             <Typography variant="h5" gutterBottom>Image Comparison</Typography>
-            <ImageComparison original={analysisResults.image_url} />
+            <ImageComparison 
+              original={analysisResults.image_url} 
+              analyzed={analysisResults.processed_image_url || analysisResults.image_url} 
+            />
           </StyledPaper>
         </Grid>
 
-        <Grid item xs={12} md={4}>
+        <Grid xs={12} md={4}>
           <StyledPaper>
             <Typography variant="h5" gutterBottom>Diagnostic Summary</Typography>
 
@@ -139,36 +185,73 @@ function Results() {
             <Divider sx={{ my: 2 }} />
 
             <Typography variant="h6" gutterBottom>Affected Areas</Typography>
-            <ul style={{ paddingLeft: 20 }}>
-              {analysisResults.affected_areas?.map((area, index) => (
-                <li key={index}>
-                  <Typography variant="body1">{area}</Typography>
-                </li>
-              )) || <Typography variant="body2">Not specified</Typography>}
-            </ul>
+            {analysisResults.affected_areas?.length > 0 ? (
+              <ul style={{ paddingLeft: 20 }}>
+                {analysisResults.affected_areas.map((area, index) => (
+                  <li key={index}>
+                    <Typography variant="body1">{area}</Typography>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No affected areas detected
+              </Typography>
+            )}
 
             <Divider sx={{ my: 2 }} />
 
             <Typography variant="h6" gutterBottom>Recommendations</Typography>
-            <ol style={{ paddingLeft: 20 }}>
-              {analysisResults.recommendations?.map((rec, index) => (
-                <li key={index}>
-                  <Typography variant="body1">{rec}</Typography>
-                </li>
-              )) || <Typography variant="body2">None provided</Typography>}
-            </ol>
+            {analysisResults.recommendations?.length > 0 ? (
+              <ol style={{ paddingLeft: 20 }}>
+                {analysisResults.recommendations.map((rec, index) => (
+                  <li key={index}>
+                    <Typography variant="body1">{rec}</Typography>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No recommendations available
+              </Typography>
+            )}
 
             <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
-              <Button variant="outlined" color="primary">
+              <Button 
+                variant="outlined" 
+                color="primary"
+                onClick={() => {/* Save logic */}}
+              >
                 Save to Medical Record
               </Button>
-              <Button variant="contained" color="primary">
+              <Button 
+                variant="contained" 
+                color="primary"
+                onClick={() => {/* Download logic */}}
+              >
                 Download Full Report
               </Button>
             </Box>
           </StyledPaper>
         </Grid>
       </Grid>
+
+      {/* New Analysis Dialog Button */}
+      <Button 
+        variant="contained" 
+        color="secondary" 
+        onClick={() => setNewAnalysisOpen(true)}
+        sx={{ mt: 4 }}
+      >
+        New Analysis
+      </Button>
+
+      {/* New Analysis Dialog */}
+      <NewAnalysisDialog
+        open={newAnalysisOpen}
+        onClose={() => setNewAnalysisOpen(false)}
+        onSubmit={handleNewAnalysis}
+      />
     </Container>
   );
 }

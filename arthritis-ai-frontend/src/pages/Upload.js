@@ -40,14 +40,7 @@ function Upload() {
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
 
-  // Redirect if not a doctor
-  useEffect(() => {
-    if (user?.role !== 'doctor') {
-      navigate('/');
-    }
-  }, [user, navigate]);
-
-  // Fetch patients for this doctor
+  // Fetch patients for this doctor (doctor-specific logic removed)
   useEffect(() => {
     const fetchPatients = async () => {
       try {
@@ -58,10 +51,8 @@ function Upload() {
       }
     };
 
-    if (user?.role === 'doctor') {
-      fetchPatients();
-    }
-  }, [user]);
+    fetchPatients();
+  }, []);
 
   const validateAndSetFile = (file) => {
     setError(null);
