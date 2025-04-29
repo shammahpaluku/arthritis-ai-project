@@ -6,12 +6,15 @@ const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
-const { spawn } = require('child_process');
+const fs = require('fs');
+const sharp = require('sharp');
+const tf = require('@tensorflow/tfjs-node');
+
 const apiRoutes = require('./routes/api');
 const authRoutes = require('./routes/auth');
 const { authenticate } = require('./middleware/authenticate');
-const { pool } = require('./db'); // Direct pool import for health check
-const logger = require('./utils/logger'); // Recommended logging util
+const { pool } = require('./db');
+const logger = require('./utils/logger');
 
 const app = express();
 
@@ -30,7 +33,7 @@ app.use((req, res, next) => {
   if (allowedOrigins.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Headers', 
+    res.header('Access-Control-Allow-Headers',
       'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   }
   next();
@@ -68,6 +71,7 @@ app.use(limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/models', express.static(path.join(__dirname, 'public/models')));
 
 // ======================
 // Health Check Endpoint
@@ -75,7 +79,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ 
+    res.json({
       status: 'healthy',
       uptime: process.uptime(),
       timestamp: new Date().toISOString()
@@ -97,10 +101,13 @@ app.post('/api/analysis', upload.single('image'), async (req, res) => {
   try {
     const { patientName, patientAge, patientGender } = req.body;
     const imageFile = req.file;
-    
-    // Process the image and save to database
-    const analysis = await processImage(imageFile.path);
-    
+
+    // Stub for processing
+    const analysis = {
+      id: Date.now(),
+      details: "Analysis logic not yet implemented."
+    };
+
     res.json({
       analysisId: analysis.id,
       message: 'Analysis submitted successfully'
@@ -111,36 +118,40 @@ app.post('/api/analysis', upload.single('image'), async (req, res) => {
 });
 
 // ======================
-// New Prediction Endpoint
+// New JS-Based Prediction Endpoint
 // ======================
 app.post('/api/predict', upload.single('xray'), async (req, res) => {
   try {
-    const pythonProcess = spawn('python', [
-      './src/predict.py',
-      '--image', req.file.path
-    ]);
+    const model = await tf.loadLayersModel('file://./public/models/model.json');
 
-    let output = '';
-    pythonProcess.stdout.on('data', (data) => {
-      output += data.toString();
-    });
+    const imageBuffer = await sharp(req.file.path)
+      .resize(224, 224)
+      .removeAlpha()
+      .toFormat('png')
+      .toBuffer();
 
-    pythonProcess.stderr.on('data', (data) => {
-      console.error(`Python error: ${data}`);
-    });
+    const tensor = tf.node.decodeImage(imageBuffer)
+      .expandDims(0)
+      .div(255.0);
 
-    pythonProcess.on('close', (code) => {
-      if (code !== 0) {
-        return res.status(500).json({ error: 'Prediction process failed.' });
-      }
-      try {
-        res.json(JSON.parse(output));
-      } catch (err) {
-        res.status(500).json({ error: 'Invalid prediction output.' });
-      }
+    const prediction = model.predict(tensor);
+    const predictionArray = prediction.arraySync()[0];
+
+    const metadata = JSON.parse(fs.readFileSync('./public/models/model_metadata.json'));
+    const labels = metadata.class_labels;
+    const highestIndex = predictionArray.indexOf(Math.max(...predictionArray));
+
+    res.json({
+      class: labels[highestIndex],
+      confidence: predictionArray[highestIndex],
+      all_probabilities: labels.map((label, i) => ({
+        class: label,
+        confidence: predictionArray[i]
+      }))
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Prediction failed.' });
   }
 });
 
@@ -152,7 +163,7 @@ app.use('/api/auth', authRoutes);
 
 // Protected test endpoint
 app.get('/protected', authenticate, (req, res) => {
-  res.json({ 
+  res.json({
     message: `Authenticated as ${req.user.username}`,
     user: {
       id: req.user.id,
