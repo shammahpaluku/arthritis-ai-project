@@ -11,12 +11,19 @@ from sklearn.metrics import classification_report, confusion_matrix
 import seaborn as sns
 import json
 import os
+import argparse
+
+# Parse arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('--train_dir', default='data/train')
+parser.add_argument('--val_dir', default='data/validation')
+parser.add_argument('--epochs', type=int, default=20)
+parser.add_argument('--batch_size', type=int, default=32)
+args = parser.parse_args()
 
 # Constants
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32
 NUM_CLASSES = 2
-EPOCHS = 20
 
 # Data generators
 train_datagen = ImageDataGenerator(
@@ -32,15 +39,15 @@ train_datagen = ImageDataGenerator(
 val_datagen = ImageDataGenerator(rescale=1./255)
 
 train_generator = train_datagen.flow_from_directory(
-    'data/train',
+    args.train_dir,
     target_size=IMG_SIZE,
-    batch_size=BATCH_SIZE,
+    batch_size=args.batch_size,
     class_mode='categorical')
 
 validation_generator = val_datagen.flow_from_directory(
-    'data/validation',
+    args.val_dir,
     target_size=IMG_SIZE,
-    batch_size=BATCH_SIZE,
+    batch_size=args.batch_size,
     class_mode='categorical',
     shuffle=False)
 
@@ -66,10 +73,10 @@ model.compile(optimizer=Adam(learning_rate=0.0001),
 # Train
 history = model.fit(
     train_generator,
-    steps_per_epoch=train_generator.samples // BATCH_SIZE,
+    steps_per_epoch=train_generator.samples // args.batch_size,
     validation_data=validation_generator,
-    validation_steps=validation_generator.samples // BATCH_SIZE,
-    epochs=EPOCHS)
+    validation_steps=validation_generator.samples // args.batch_size,
+    epochs=args.epochs)
 
 # Ensure models/ directory exists
 os.makedirs('models', exist_ok=True)
@@ -105,8 +112,6 @@ def plot_training_history(history):
     plt.savefig('models/training_history.png')
     plt.show()
 
-plot_training_history(history)
-
 # Plot confusion matrix
 def plot_confusion_matrix(generator, model):
     y_true = generator.classes
@@ -128,4 +133,8 @@ def plot_confusion_matrix(generator, model):
     print("\nClassification Report:")
     print(classification_report(y_true, y_pred_classes, target_names=generator.class_indices.keys()))
 
+# Call plotting functions
+plot_training_history(history)
 plot_confusion_matrix(validation_generator, model)
+
+print("\n✅ Training complete. Model and plots saved in 'models/' directory.")

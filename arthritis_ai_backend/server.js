@@ -6,6 +6,7 @@ const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const multer = require('multer');
+const { spawn } = require('child_process');
 const apiRoutes = require('./routes/api');
 const authRoutes = require('./routes/auth');
 const { authenticate } = require('./middleware/authenticate');
@@ -24,7 +25,6 @@ app.use(helmet());
 // ======================
 const allowedOrigins = process.env.FRONTEND_URL?.split(',') || ['http://localhost:3000'];
 
-// Inject CORS headers manually
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
@@ -36,7 +36,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Main CORS middleware
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -50,7 +49,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// Enable preflight for all routes
 app.options('*', cors());
 
 // ======================
@@ -113,10 +111,44 @@ app.post('/api/analysis', upload.single('image'), async (req, res) => {
 });
 
 // ======================
+// New Prediction Endpoint
+// ======================
+app.post('/api/predict', upload.single('xray'), async (req, res) => {
+  try {
+    const pythonProcess = spawn('python', [
+      './src/predict.py',
+      '--image', req.file.path
+    ]);
+
+    let output = '';
+    pythonProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      console.error(`Python error: ${data}`);
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        return res.status(500).json({ error: 'Prediction process failed.' });
+      }
+      try {
+        res.json(JSON.parse(output));
+      } catch (err) {
+        res.status(500).json({ error: 'Invalid prediction output.' });
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ======================
 // Routes
 // ======================
 app.use('/api', apiRoutes);
-app.use('/api/auth', authRoutes); // Auth routes under /api/auth
+app.use('/api/auth', authRoutes);
 
 // Protected test endpoint
 app.get('/protected', authenticate, (req, res) => {
@@ -144,7 +176,8 @@ app.get('/', (req, res) => {
       api: {
         upload: 'POST /api/upload',
         results: 'GET /api/results',
-        analysis: 'POST /api/analyze/:imageId'
+        analysis: 'POST /api/analyze/:imageId',
+        predict: 'POST /api/predict'
       },
       system: {
         health: 'GET /health',

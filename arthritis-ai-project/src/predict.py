@@ -7,6 +7,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--image', type=str, required=True, help='Path to input image')
     parser.add_argument('--model', type=str, default='models/arthritis_resnet50_model.h5')
+    parser.add_argument('--export_tflite', action='store_true', help='Export model to TFLite format')
     args = parser.parse_args()
 
     # Initialize system
@@ -30,6 +31,14 @@ def main():
     print(f"Class: {result['class']}")
     print(f"Confidence: {result['confidence']:.2%}")
     print("All probabilities:", result['all_classes'])
+
+    # Add TFLite export capability
+    if args.export_tflite:
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        with open('models/arthritis_model.tflite', 'wb') as f:
+            f.write(tflite_model)
+        print("\nTFLite model has been exported as 'arthritis_model.tflite'")
 
 if __name__ == "__main__":
     main()
