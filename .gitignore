@@ -5,6 +5,9 @@ arthritis_ai_backend/node_modules/
 arthritis-ai-frontend/node_modules/
 data/
 models/
+*.keras
+*.bin
+*.json
 *.h5
 *.png
 venv/

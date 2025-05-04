@@ -95,6 +95,55 @@ app.get('/health', async (req, res) => {
 const upload = multer({ dest: 'uploads/' });
 
 // ======================
+// Load the TensorFlow Model
+// ======================
+let model;
+async function loadModel() {
+  model = await tf.loadLayersModel('file://./public/models/model.json');
+  console.log('✅ Model loaded');
+}
+loadModel();
+
+// ======================
+// New JS-Based Prediction Endpoint
+// ======================
+app.post('/api/predict', upload.single('xray'), async (req, res) => {
+  try {
+    // 1. Load the image
+    const imageBuffer = await sharp(req.file.path)
+      .resize(224, 224)
+      .removeAlpha()
+      .toFormat('png')
+      .toBuffer();
+
+    const imageTensor = tf.node.decodeImage(imageBuffer)
+      .expandDims(0)
+      .div(255.0);
+
+    // 2. Predict with the model
+    const prediction = model.predict(imageTensor);
+    const predictionArray = prediction.arraySync()[0];
+
+    // 3. Load metadata and format response
+    const metadata = JSON.parse(fs.readFileSync('./public/models/model_metadata.json'));
+    const labels = metadata.class_labels;
+    const highestIndex = predictionArray.indexOf(Math.max(...predictionArray));
+
+    res.json({
+      class: labels[highestIndex],
+      confidence: predictionArray[highestIndex],
+      all_probabilities: labels.map((label, i) => ({
+        class: label,
+        confidence: predictionArray[i]
+      }))
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Prediction failed.' });
+  }
+});
+
+// ======================
 // Analysis Routes
 // ======================
 app.post('/api/analysis', upload.single('image'), async (req, res) => {
@@ -114,44 +163,6 @@ app.post('/api/analysis', upload.single('image'), async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
-  }
-});
-
-// ======================
-// New JS-Based Prediction Endpoint
-// ======================
-app.post('/api/predict', upload.single('xray'), async (req, res) => {
-  try {
-    const model = await tf.loadLayersModel('file://./public/models/model.json');
-
-    const imageBuffer = await sharp(req.file.path)
-      .resize(224, 224)
-      .removeAlpha()
-      .toFormat('png')
-      .toBuffer();
-
-    const tensor = tf.node.decodeImage(imageBuffer)
-      .expandDims(0)
-      .div(255.0);
-
-    const prediction = model.predict(tensor);
-    const predictionArray = prediction.arraySync()[0];
-
-    const metadata = JSON.parse(fs.readFileSync('./public/models/model_metadata.json'));
-    const labels = metadata.class_labels;
-    const highestIndex = predictionArray.indexOf(Math.max(...predictionArray));
-
-    res.json({
-      class: labels[highestIndex],
-      confidence: predictionArray[highestIndex],
-      all_probabilities: labels.map((label, i) => ({
-        class: label,
-        confidence: predictionArray[i]
-      }))
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Prediction failed.' });
   }
 });
 
